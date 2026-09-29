@@ -1,0 +1,20 @@
+apiVersion: demo.milan.dev/v1alpha1
+kind: App
+metadata:
+  name: podinfo
+  namespace: default
+spec:
+  activeColor: green
+  replicas: 1
+  port: 9898
+  blue:
+    version: "3.0.0"
+    image: stefanprodan/podinfo:6.15.0
+    env:
+      PODINFO_UI_MESSAGE: v3 served by blue (broken build)
+      PODINFO_UNHEALTHY: "true"
+  green:
+    version: "2.0.0"
+    image: stefanprodan/podinfo:6.15.0
+    env:
+      PODINFO_UI_MESSAGE: v2 served by green

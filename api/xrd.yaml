@@ -1,0 +1,77 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xapps.demo.milan.dev
+spec:
+  group: demo.milan.dev
+  names:
+    kind: XApp
+    plural: xapps
+  claimNames:
+    kind: App
+    plural: apps
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [activeColor, blue, green]
+              properties:
+                activeColor:
+                  description: Release slot that receives traffic. Change it to switch.
+                  type: string
+                  enum: [blue, green]
+                replicas:
+                  description: Replicas per slot.
+                  type: integer
+                  minimum: 1
+                  default: 1
+                port:
+                  description: Container port the application listens on.
+                  type: integer
+                  default: 8080
+                blue:
+                  type: object
+                  required: [version, image]
+                  properties:
+                    version:
+                      description: Release identifier; shows up in labels and in status once rolled out.
+                      type: string
+                    image: { type: string }
+                    env:
+                      description: Environment variables for the container.
+                      type: object
+                      additionalProperties: { type: string }
+                green:
+                  type: object
+                  required: [version, image]
+                  properties:
+                    version:
+                      description: Release identifier; shows up in labels and in status once rolled out.
+                      type: string
+                    image: { type: string }
+                    env:
+                      description: Environment variables for the container.
+                      type: object
+                      additionalProperties: { type: string }
+            status:
+              type: object
+              properties:
+                servingColor:
+                  description: Slot the Service selector currently points at, as seen in the cluster.
+                  type: string
+                blue:
+                  type: object
+                  properties:
+                    version: { type: string }
+                    ready: { type: boolean }
+                green:
+                  type: object
+                  properties:
+                    version: { type: string }
+                    ready: { type: boolean }

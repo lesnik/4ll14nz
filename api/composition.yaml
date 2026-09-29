@@ -1,0 +1,124 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapps.demo.milan.dev
+spec:
+  compositeTypeRef:
+    apiVersion: demo.milan.dev/v1alpha1
+    kind: XApp
+  mode: Pipeline
+  pipeline:
+    - step: render
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource }}
+            {{- $name := dig "spec" "claimRef" "name" $xr.metadata.name $xr }}
+            {{- $ns := dig "spec" "claimRef" "namespace" "default" $xr }}
+            {{- $replicas := dig "spec" "replicas" 1 $xr }}
+            {{- $port := dig "spec" "port" 8080 $xr }}
+            {{- $active := $xr.spec.activeColor }}
+
+            {{- range $color := list "blue" "green" }}
+            {{- $slot := index $xr.spec $color }}
+            {{- $env := list }}
+            {{- range $k, $v := dig "env" (dict) $slot }}{{ $env = append $env (dict "name" $k "value" $v) }}{{ end }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              annotations:
+                {{ setResourceNameAnnotation (print "deploy-" $color) }}
+            spec:
+              watch: true
+              readiness:
+                policy: DeriveFromCelQuery
+                celQuery: >-
+                  has(object.status) &&
+                  has(object.status.observedGeneration) &&
+                  object.status.observedGeneration == object.metadata.generation &&
+                  has(object.status.updatedReplicas) &&
+                  object.status.updatedReplicas == object.spec.replicas &&
+                  has(object.status.availableReplicas) &&
+                  object.status.availableReplicas == object.spec.replicas &&
+                  (!has(object.status.unavailableReplicas) || object.status.unavailableReplicas == 0)
+              forProvider:
+                manifest:
+                  apiVersion: apps/v1
+                  kind: Deployment
+                  metadata:
+                    name: {{ $name }}-{{ $color }}
+                    namespace: {{ $ns }}
+                    labels:
+                      app: {{ $name }}
+                      color: {{ $color }}
+                  spec:
+                    replicas: {{ $replicas }}
+                    selector:
+                      matchLabels:
+                        app: {{ $name }}
+                        color: {{ $color }}
+                    template:
+                      metadata:
+                        labels:
+                          app: {{ $name }}
+                          color: {{ $color }}
+                          version: {{ $slot.version | quote }}
+                      spec:
+                        containers:
+                          - name: app
+                            image: {{ $slot.image }}
+                            env: {{ toJson $env }}
+                            ports:
+                              - containerPort: {{ $port }}
+                            readinessProbe:
+                              tcpSocket:
+                                port: {{ $port }}
+                              periodSeconds: 2
+            {{- end }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              annotations:
+                {{ setResourceNameAnnotation "service" }}
+            spec:
+              watch: true
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Service
+                  metadata:
+                    name: {{ $name }}
+                    namespace: {{ $ns }}
+                    labels:
+                      app: {{ $name }}
+                  spec:
+                    selector:
+                      app: {{ $name }}
+                      color: {{ $active }}
+                    ports:
+                      - port: 80
+                        targetPort: {{ $port }}
+            ---
+            apiVersion: demo.milan.dev/v1alpha1
+            kind: XApp
+            status:
+              servingColor: {{ dig "resources" "service" "resource" "status" "atProvider" "manifest" "spec" "selector" "color" "" $.observed | quote }}
+              {{- range $color := list "blue" "green" }}
+              {{- $obj := getComposedResource $ (print "deploy-" $color) }}
+              {{- /* version read from the Deployment as it currently exists in the cluster */}}
+              {{- $observedVersion := dig "status" "atProvider" "manifest" "spec" "template" "metadata" "labels" "version" "" ($obj | default dict) }}
+              {{- $objReady := eq (getResourceCondition "Ready" $obj).Status "True" }}
+              {{ $color }}:
+                version: {{ $observedVersion | quote }}
+                ready: {{ and $objReady (eq $observedVersion (index $xr.spec $color).version) }}
+              {{- end }}
+    - step: ready
+      functionRef:
+        name: function-auto-ready
